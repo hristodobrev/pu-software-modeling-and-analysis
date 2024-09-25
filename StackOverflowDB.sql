@@ -16,8 +16,14 @@ GO
 USE StackOverflowDB;
 GO
 
+CREATE SCHEMA [User];
+GO
+
+CREATE SCHEMA Question;
+GO
+
 ------------ TABLES ------------
-CREATE TABLE [User] (
+CREATE TABLE [User].[User] (
 	Id INT IDENTITY(1, 1) NOT NULL,
 	Title VARCHAR(20) NOT NULL,
 	FirstName VARCHAR(50) NULL,
@@ -31,17 +37,17 @@ CREATE TABLE [User] (
 );
 GO
 
-CREATE TABLE SaveList (
+CREATE TABLE [User].SaveList (
 	Id INT IDENTITY(1, 1) NOT NULL,
 	[Name] VARCHAR(50) NOT NULL,
 	UserId INT NOT NULL,
 
 	CONSTRAINT PK_SaveList_Id PRIMARY KEY (Id),
-	CONSTRAINT FK_SaveList_UserId FOREIGN KEY (UserId) REFERENCES [User](Id)
+	CONSTRAINT FK_SaveList_UserId FOREIGN KEY (UserId) REFERENCES [User].[User](Id)
 );
 GO
 
-CREATE TABLE Question (
+CREATE TABLE Question.Question (
 	Id INT IDENTITY(1, 1) NOT NULL,
 	Title VARCHAR(100) NOT NULL,
 	[Description] VARCHAR(1000) NOT NULL,
@@ -54,12 +60,12 @@ CREATE TABLE Question (
 	UserId INT NOT NULL,
 
 	CONSTRAINT PK_Question_Id PRIMARY KEY (Id),
-	CONSTRAINT FK_Question_SaveListId FOREIGN KEY (SaveListId) REFERENCES SaveList(Id),
-	CONSTRAINT FK_Question_UserId FOREIGN KEY (UserId) REFERENCES [User](Id)
+	CONSTRAINT FK_Question_SaveListId FOREIGN KEY (SaveListId) REFERENCES [User].SaveList(Id),
+	CONSTRAINT FK_Question_UserId FOREIGN KEY (UserId) REFERENCES [User].[User](Id)
 );
 GO
 
-CREATE TABLE Answer (
+CREATE TABLE Question.Answer (
 	Id INT IDENTITY(1, 1) NOT NULL,
 	[Text] VARCHAR(1000) NOT NULL,
 	Upvotes INT NOT NULL CONSTRAINT DF_Answer_Upvotes DEFAULT 0,
@@ -69,16 +75,16 @@ CREATE TABLE Answer (
 	UserId INT NOT NULL,
 
 	CONSTRAINT PK_Answer_Id PRIMARY KEY (Id),
-	CONSTRAINT FK_Answer_QuestionId FOREIGN KEY (QuestionId) REFERENCES Question(Id),
-	CONSTRAINT FK_Answer_UserId FOREIGN KEY (UserId) REFERENCES [User](Id)
+	CONSTRAINT FK_Answer_QuestionId FOREIGN KEY (QuestionId) REFERENCES Question.Question(Id),
+	CONSTRAINT FK_Answer_UserId FOREIGN KEY (UserId) REFERENCES [User].[User](Id)
 );
 GO
 
-ALTER TABLE Question
-ADD CONSTRAINT FK_Question_AnswerId FOREIGN KEY (AnswerId) REFERENCES Answer(Id);
+ALTER TABLE Question.Question
+ADD CONSTRAINT FK_Question_AnswerId FOREIGN KEY (AnswerId) REFERENCES Question.Answer(Id);
 GO
 
-CREATE TABLE Badge (
+CREATE TABLE [User].Badge (
 	Id INT IDENTITY(1, 1) NOT NULL,
 	[Name] VARCHAR(50) NOT NULL,
 	RequiredRating INT NOT NULL CONSTRAINT DF_Badge_RequiredRating DEFAULT 0,
@@ -88,17 +94,17 @@ CREATE TABLE Badge (
 );
 GO
 
-CREATE TABLE UserBadge (
+CREATE TABLE [User].UserBadge (
 	UserId INT NOT NULL,
 	BadgeId INT NOT NULL,
 
-	CONSTRAINT FK_UserBadge_UserId FOREIGN KEY (UserId) REFERENCES [User](Id),
-	CONSTRAINT FK_UserBadge_BadgeId FOREIGN KEY (BadgeId) REFERENCES Badge(Id),
+	CONSTRAINT FK_UserBadge_UserId FOREIGN KEY (UserId) REFERENCES [User].[User](Id),
+	CONSTRAINT FK_UserBadge_BadgeId FOREIGN KEY (BadgeId) REFERENCES [User].Badge(Id),
 	CONSTRAINT UQ_UserBadge_UserId_BadgeId UNIQUE (UserId, BadgeId)
 );
 GO
 
-CREATE TABLE Tag (
+CREATE TABLE Question.Tag (
 	Id INT IDENTITY(1, 1) NOT NULL,
 	[Name] VARCHAR(50) NOT NULL,
 	EarnedRating INT NOT NULL CONSTRAINT DF_Tag_EarnedRating DEFAULT 0,
@@ -108,35 +114,58 @@ CREATE TABLE Tag (
 );
 GO
 
-CREATE TABLE QuestionTag (
+CREATE TABLE Question.QuestionTag (
 	QuestionId INT NOT NULL,
 	TagId INT NOT NULL,
 
-	CONSTRAINT FK_QuestionTag_UserId FOREIGN KEY (QuestionId) REFERENCES Question(Id),
-	CONSTRAINT FK_QuestionTag_BadgeId FOREIGN KEY (TagId) REFERENCES Tag(Id),
+	CONSTRAINT FK_QuestionTag_UserId FOREIGN KEY (QuestionId) REFERENCES Question.Question(Id),
+	CONSTRAINT FK_QuestionTag_BadgeId FOREIGN KEY (TagId) REFERENCES Question.Tag(Id),
 	CONSTRAINT UQ_QuestionTag_UserId_BadgeId UNIQUE (QuestionId, TagId)
 );
 GO
 
------------- TRIGGERS ------------
-CREATE OR ALTER TRIGGER TR_ForInsertQuestion
-ON Question
-FOR INSERT
+------------ FUNCTIONS ------------
+CREATE OR ALTER FUNCTION Question.F_QuestionRating
+(
+	@QuestionId INT
+)
+RETURNS INT
 AS
 BEGIN
-	SELECT *
-	FROM inserted
+	DECLARE @Rating INT;
+
+	SELECT @Rating = SUM(EarnedRating)
+	FROM Question.Tag t
+		INNER JOIN Question.QuestionTag qt ON qt.QuestionId = t.Id
+		INNER JOIN Question.Question q ON q.Id = qt.QuestionId
+	WHERE q.Id = @QuestionId
+
+	RETURN @Rating
+END
+GO
+
+------------ TRIGGERS ------------
+CREATE OR ALTER TRIGGER Question.TR_ForUpdateQuestion
+ON Question.Question
+FOR UPDATE
+AS
+BEGIN
+	UPDATE u
+	SET Rating = Rating + Question.F_QuestionRating(q.Id)
+	FROM [User].[User] u
+		INNER JOIN Question.Question q on q.UserId = u.Id
+		INNER JOIN deleted d on d.Id = q.Id
+		INNER JOIN inserted i on i.Id = d.Id
+	WHERE d.AnswerId is null and i.AnswerId != 0
 END
 GO
 
 ------------ PROCEDURES ------------
 
 
------------- FUNCTIONS ------------
-
 
 ------------ FEED DB WITH DATA ------------
-INSERT INTO [User] (Title, FirstName, LastName, Phone, Email)
+INSERT INTO [User].[User] (Title, FirstName, LastName, Phone, Email)
 VALUES 
 ('Mr', 'John', 'Doe', '555-1234', 'john.doe@example.com'),
 ('Ms', NULL, 'Smith', NULL, 'jane.smith@example.com'),
@@ -150,7 +179,7 @@ VALUES
 ('Mr', 'David', 'Lee', '555-5555', 'david.lee@example.org');
 GO
 
-INSERT INTO SaveList ([Name], UserId)
+INSERT INTO [User].SaveList ([Name], UserId)
 VALUES
 ('My Favorite Questions', 1),
 ('Saved Articles', 2),
@@ -164,7 +193,7 @@ VALUES
 ('Personal List', 1);
 GO
 
-INSERT INTO Question (Title, [Description], AnswerId, SaveListId, UserId, CreateDate)
+INSERT INTO Question.Question (Title, [Description], AnswerId, SaveListId, UserId, CreateDate)
 VALUES
 ('How to optimize SQL queries?', 'Looking for ways to speed up query execution in SQL.', NULL, 1, 1, '2024-09-01 14:35:00'),
 ('What is polymorphism in OOP?', 'Can someone explain the concept of polymorphism with examples?', NULL, 2, 2, '2024-09-05 09:22:00'),
@@ -178,7 +207,7 @@ VALUES
 ('What is the SOLID principle in software development?', 'Can someone break down the SOLID principles for object-oriented design?', NULL, 1, 3, '2024-10-05 10:30:00');
 GO
 
-INSERT INTO Answer ([Text], QuestionId, UserId, CreateDate)
+INSERT INTO Question.Answer ([Text], QuestionId, UserId, CreateDate)
 VALUES
 ('You can use indexing and proper query planning to optimize SQL queries.', 1, 2, '2024-09-02 12:45:00'),
 ('Polymorphism allows objects to be treated as instances of their parent class.', 2, 1, '2024-09-06 10:05:00'),
@@ -207,7 +236,7 @@ VALUES
 ('HTTPS also provides identity verification, ensuring that users are communicating with the intended server.', 6, 4, '2024-09-23 14:00:00');
 GO
 
-INSERT INTO Badge ([Name], RequiredRating)
+INSERT INTO [User].Badge ([Name], RequiredRating)
 VALUES
 ('SQL Master', 500),
 ('OOP Expert', 300),
@@ -221,21 +250,21 @@ VALUES
 ('Full Stack Developer', 500);
 GO
 
-INSERT INTO Tag ([Name], EarnedRating)
+INSERT INTO Question.Tag ([Name], EarnedRating)
 VALUES
-('SQL Optimization', 50),
-('Polymorphism', 75),
-('REST API', 60),
-('.NET Caching', 40),
-('Foreign Keys', 30),
-('HTTPS', 25),
-('Stored Procedures', 70),
-('Agile Development', 90),
-('React State Management', 80),
-('SOLID Principles', 85);
+('SQL Optimization', 5),
+('Polymorphism', 7),
+('REST API', 6),
+('.NET Caching', 4),
+('Foreign Keys', 3),
+('HTTPS', 2),
+('Stored Procedures', 7),
+('Agile Development', 9),
+('React State Management', 8),
+('SOLID Principles', 8);
 GO
 
-INSERT INTO QuestionTag (QuestionId, TagId)
+INSERT INTO Question.QuestionTag (QuestionId, TagId)
 VALUES
 (1, 1), -- SQL Optimization for "How to optimize SQL queries?"
 (1, 4), -- .NET Caching for "How to optimize SQL queries?"
@@ -262,11 +291,11 @@ GO
 
 -- Below can be extracted in a procedure
 SELECT q.CreateDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName) as 'Asked By', q.Title, q.Description, STRING_AGG(t.Name, ', '), a.CreateDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName) as 'Answered By', a.Text
-FROM Question q
-	LEFT JOIN Answer a ON a.QuestionId = q.Id
-	LEFT JOIN QuestionTag qt ON qt.QuestionId = q.Id
-	LEFT JOIN Tag t ON t.Id = qt.TagId
-	INNER JOIN [User] qu ON qu.Id = q.UserId
-	INNER JOIN [User] au ON au.Id = a.UserId
+FROM Question.Question q
+	LEFT JOIN Question.Answer a ON a.QuestionId = q.Id
+	LEFT JOIN Question.QuestionTag qt ON qt.QuestionId = q.Id
+	LEFT JOIN Question.Tag t ON t.Id = qt.TagId
+	INNER JOIN [User].[User] qu ON qu.Id = q.UserId
+	INNER JOIN [User].[User] au ON au.Id = a.UserId
 GROUP BY q.CreateDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName), q.Title, q.Description, a.CreateDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName), a.Text
 ORDER BY q.CreateDate DESC, a.CreateDate DESC
