@@ -150,18 +150,58 @@ ON Question.Question
 FOR UPDATE
 AS
 BEGIN
+	-- When question has been updated with correct answer, increase the user rating by the rating earned from the tags of that question
 	UPDATE u
 	SET Rating = Rating + Question.F_QuestionRating(q.Id)
 	FROM [User].[User] u
-		INNER JOIN Question.Question q on q.UserId = u.Id
-		INNER JOIN deleted d on d.Id = q.Id
-		INNER JOIN inserted i on i.Id = d.Id
-	WHERE d.AnswerId is null and i.AnswerId != 0
+		INNER JOIN Question.Question q ON q.UserId = u.Id
+		INNER JOIN deleted d ON d.Id = q.Id
+		INNER JOIN inserted i ON i.Id = d.Id
+	WHERE d.AnswerId IS NULL AND i.AnswerId != 0
 END
 GO
 
------------- PROCEDURES ------------
+CREATE OR ALTER TRIGGER Question.TR_ForInsertAnswer
+ON Question.Answer
+FOR INSERT
+AS
+BEGIN
+	-- Increase user rating when they post answer to some question
+	UPDATE u
+	SET Rating = Rating + 5
+	FROM inserted i
+		INNER JOIN [User].[User] u ON u.Id = i.UserId
+END
+GO
 
+CREATE OR ALTER TRIGGER [User].TR_ForUpdateUser
+ON [User].[User]
+FOR UPDATE
+AS
+BEGIN
+	-- When user rating has been updated, check if they should receive a badge
+	DECLARE @userBadges TABLE(
+		UserId INT, 
+		BadgeId INT
+	);
+
+	INSERT INTO UserBadge
+	SELECT i.Id, b.Id
+	FROM inserted i
+		INNER JOIN Badge b ON i.Rating >= b.RequiredRating
+	WHERE NOT EXISTS (SELECT 1 FROM UserBadge ub WHERE ub.UserId = i.Id and b.Id = ub.BadgeId)
+
+	INSERT INTO UserBadge (UserId, BadgeId)
+	SELECT *
+	FROM @userBadges
+
+	SELECT u.Title + ' ' + u.LastName + ' earned badge ' + b.Name AS Earnings
+	FROM @userBadges ub
+		INNER JOIN [User].[User] u ON u.Id = ub.UserId
+		INNER JOIN [User].Badge b ON b.Id = ub.BadgeId
+END
+GO
+------------ PROCEDURES ------------
 
 
 ------------ FEED DB WITH DATA ------------
