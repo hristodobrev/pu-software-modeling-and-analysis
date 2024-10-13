@@ -144,6 +144,21 @@ BEGIN
 END
 GO
 
+CREATE OR ALTER FUNCTION [User].F_GetSavedLists
+(
+	@UserId INT
+)
+RETURNS TABLE
+AS
+RETURN
+
+	SELECT sl.Name, COUNT(1) AS QuestionsCount
+	FROM [User].SaveList sl
+		INNER JOIN Question.Question q ON q.SaveListId = sl.Id
+	WHERE sl.UserId = @UserId
+	GROUP BY sl.Name
+GO
+
 ------------ TRIGGERS ------------
 CREATE OR ALTER TRIGGER Question.TR_ForUpdateQuestion
 ON Question.Question
@@ -167,8 +182,9 @@ FOR INSERT
 AS
 BEGIN
 	-- Increase user rating when they post answer to some question
+	-- Rating must be increased by the product of all the answers inserted from given user)
 	UPDATE u
-	SET Rating = Rating + 5
+	SET Rating = Rating + (SELECT COUNT(1) * 5 FROM inserted i WHERE i.UserId = u.id)
 	FROM inserted i
 		INNER JOIN [User].[User] u ON u.Id = i.UserId
 END
@@ -185,7 +201,7 @@ BEGIN
 		BadgeId INT
 	);
 
-	INSERT INTO UserBadge
+	INSERT INTO @userBadges
 	SELECT i.Id, b.Id
 	FROM inserted i
 		INNER JOIN Badge b ON i.Rating >= b.RequiredRating
@@ -195,15 +211,62 @@ BEGIN
 	SELECT *
 	FROM @userBadges
 
-	SELECT u.Title + ' ' + u.LastName + ' earned badge ' + b.Name AS Earnings
+	DECLARE @message VARCHAR(1000);
+	SELECT @message = STRING_AGG(u.Title + ' ' + u.LastName + ' earned badge ' + b.Name, CHAR(13))
 	FROM @userBadges ub
 		INNER JOIN [User].[User] u ON u.Id = ub.UserId
 		INNER JOIN [User].Badge b ON b.Id = ub.BadgeId
+
+	PRINT(@message)
 END
 GO
 ------------ PROCEDURES ------------
+CREATE OR ALTER PROCEDURE Question.USP_GetQuestionsWithAnswers
+AS
+BEGIN
 
+	SELECT q.Title AS Question, q.Description, q.CreateDate AS QuestionDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName) AS AskedBy, a.Text AS Answer, a.CreateDate AS AnswerDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName) as AnsweredBy, STRING_AGG(t.Name, ', ') AS Tags
+	FROM Question.Question q
+		LEFT JOIN Question.Answer a ON a.QuestionId = q.Id
+		LEFT JOIN Question.QuestionTag qt ON qt.QuestionId = q.Id
+		LEFT JOIN Question.Tag t ON t.Id = qt.TagId
+		INNER JOIN [User].[User] qu ON qu.Id = q.UserId
+		INNER JOIN [User].[User] au ON au.Id = a.UserId
+	GROUP BY q.Title, q.Description, q.CreateDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName), a.Text, a.CreateDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName)
+	ORDER BY q.CreateDate DESC, a.CreateDate DESC
 
+END
+GO
+
+CREATE OR ALTER PROCEDURE Question.USP_GetUserQuestions
+(@UserId INT)
+AS
+BEGIN
+
+	SELECT q.Title AS Question, q.Description, q.CreateDate AS QuestionDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName) AS AskedBy, a.Text AS Answer, a.CreateDate AS AnswerDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName) as AnsweredBy, STRING_AGG(t.Name, ', ') AS Tags
+	FROM Question.Question q
+		LEFT JOIN Question.Answer a ON a.QuestionId = q.Id
+		LEFT JOIN Question.QuestionTag qt ON qt.QuestionId = q.Id
+		LEFT JOIN Question.Tag t ON t.Id = qt.TagId
+		INNER JOIN [User].[User] qu ON qu.Id = q.UserId
+		INNER JOIN [User].[User] au ON au.Id = a.UserId
+	WHERE q.UserId = @UserId
+	GROUP BY q.Title, q.Description, q.CreateDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName), a.Text, a.CreateDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName)
+	ORDER BY q.CreateDate DESC, a.CreateDate DESC
+
+END
+GO
+
+CREATE OR ALTER PROCEDURE [User].USP_GetStatistics
+AS
+BEGIN
+	SELECT CONCAT(u.Title, ' ', u.FirstName, ' ', u.LastName) AS [User], u.Rating, Questions.QuestionsCount, Answers.AnswersCount, Badges.BadgesCount
+	FROM [User].[User] u
+		CROSS APPLY (SELECT COUNT(1) AS QuestionsCount FROM Question.Question WHERE UserId = u.Id) Questions
+		CROSS APPLY (SELECT COUNT(1) AS AnswersCount FROM Question.Answer WHERE UserId = u.Id) Answers
+		CROSS APPLY (SELECT COUNT(1) AS BadgesCount FROM [User].UserBadge WHERE UserId = u.Id) Badges
+END
+GO
 ------------ FEED DB WITH DATA ------------
 INSERT INTO [User].[User] (Title, FirstName, LastName, Phone, Email)
 VALUES 
@@ -329,13 +392,14 @@ VALUES
 (10, 4); -- .NET Caching for "What is the SOLID principle in software development?"
 GO
 
--- Below can be extracted in a procedure
-SELECT q.CreateDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName) as 'Asked By', q.Title, q.Description, STRING_AGG(t.Name, ', '), a.CreateDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName) as 'Answered By', a.Text
-FROM Question.Question q
-	LEFT JOIN Question.Answer a ON a.QuestionId = q.Id
-	LEFT JOIN Question.QuestionTag qt ON qt.QuestionId = q.Id
-	LEFT JOIN Question.Tag t ON t.Id = qt.TagId
-	INNER JOIN [User].[User] qu ON qu.Id = q.UserId
-	INNER JOIN [User].[User] au ON au.Id = a.UserId
-GROUP BY q.CreateDate, CONCAT(qu.Title, ' ', qu.FirstName, ' ', qu.LastName), q.Title, q.Description, a.CreateDate, CONCAT(au.Title, ' ', au.FirstName, ' ', au.LastName), a.Text
-ORDER BY q.CreateDate DESC, a.CreateDate DESC
+EXEC [User].USP_GetStatistics
+
+UPDATE Question.Question SET AnswerId = 1 WHERE Id = 1
+UPDATE Question.Question SET AnswerId = 8 WHERE Id = 8
+UPDATE Question.Question SET AnswerId = 22 WHERE Id = 3
+UPDATE Question.Question SET AnswerId = 7 WHERE Id = 7
+
+EXEC [User].USP_GetStatistics
+
+SELECT * 
+FROM [User].F_GetSavedLists(1)
