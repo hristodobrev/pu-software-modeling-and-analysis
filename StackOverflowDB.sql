@@ -238,7 +238,7 @@ BEGIN
 END
 GO
 
-CREATE OR ALTER PROCEDURE Question.USP_GetUserQuestions
+CREATE OR ALTER PROCEDURE Question.USP_GetUsersQuestions
 (@UserId INT)
 AS
 BEGIN
@@ -257,7 +257,7 @@ BEGIN
 END
 GO
 
-CREATE OR ALTER PROCEDURE [User].USP_GetStatistics
+CREATE OR ALTER PROCEDURE [User].USP_GetUsersStatistics
 AS
 BEGIN
 	SELECT CONCAT(u.Title, ' ', u.FirstName, ' ', u.LastName) AS [User], u.Rating, Questions.QuestionsCount, Answers.AnswersCount, Badges.BadgesCount
@@ -392,14 +392,25 @@ VALUES
 (10, 4); -- .NET Caching for "What is the SOLID principle in software development?"
 GO
 
-EXEC [User].USP_GetStatistics
+------------ MAKE SOME ACTIONS TO CHECK IF ALL IS WORKING AS EXPECTED ------------
+-- Update some questions with answered (set the answerId) and check if the users asked those question has their rating increased after that
+EXEC [User].USP_GetUsersStatistics
 
 UPDATE Question.Question SET AnswerId = 1 WHERE Id = 1
 UPDATE Question.Question SET AnswerId = 8 WHERE Id = 8
 UPDATE Question.Question SET AnswerId = 22 WHERE Id = 3
 UPDATE Question.Question SET AnswerId = 7 WHERE Id = 7
 
-EXEC [User].USP_GetStatistics
+EXEC [User].USP_GetUsersStatistics
+
 
 SELECT * 
 FROM [User].F_GetSavedLists(1)
+
+-- Increase user ratings and check if they earn the badges for their new rating
+EXEC [User].USP_GetUsersStatistics
+
+UPDATE [User].[User]
+SET Rating = Rating + Id * 50
+
+EXEC [User].USP_GetUsersStatistics
